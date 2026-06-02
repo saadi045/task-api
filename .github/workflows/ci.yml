@@ -140,7 +140,7 @@ jobs:
       # Step A: Run Trivy with full output (informational — never fails the job).
       # Shows everything in the CI log so we can see what's there.
       - name: Trivy scan (all severities, informational)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: task-api:scan
           format: table
@@ -151,7 +151,7 @@ jobs:
       # Step B: Re-scan, this time only HIGH/CRITICAL, fails the job if any found.
       # This is what controls whether the security job is green or red.
       - name: Trivy scan (HIGH/CRITICAL, fails build)
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: task-api:scan
           format: table
