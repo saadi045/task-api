@@ -2,12 +2,14 @@
 #
 # Continuous Integration pipeline for task-api.
 #
-# Three independent jobs run in parallel on every push and PR to main:
-#   - lint:  runs ESLint
-#   - test:  runs migrations + the full test suite against PostgreSQL
-#   - build: verifies the production Docker image builds successfully
+# Four parallel jobs on every push and PR to main:
+#   - lint:     ESLint
+#   - test:     migrations + full test suite against PostgreSQL
+#   - build:    verify the production Docker image builds
+#   - security: scan the Docker image for known vulnerabilities (Trivy)
 #
-# Each job reports its own pass/fail status, so failures are easy to locate.
+# The security job fails the build only on HIGH or CRITICAL severity findings.
+# Lower-severity findings are reported but don't block.
 
 name: CI
 
@@ -20,7 +22,6 @@ on:
 jobs:
   # -----------------------------------------------------------------
   # Job 1: Lint
-  # Fast static analysis. No database needed.
   # -----------------------------------------------------------------
   lint:
     name: Lint
@@ -43,7 +44,6 @@ jobs:
 
   # -----------------------------------------------------------------
   # Job 2: Test
-  # Runs the full test suite against a real PostgreSQL service container.
   # -----------------------------------------------------------------
   test:
     name: Test
@@ -90,8 +90,6 @@ jobs:
 
   # -----------------------------------------------------------------
   # Job 3: Build
-  # Verifies the production Docker image builds cleanly.
-  # Catches Dockerfile bugs before they reach deployment.
   # -----------------------------------------------------------------
   build:
     name: Docker Build
@@ -111,3 +109,52 @@ jobs:
           tags: task-api:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # -----------------------------------------------------------------
+  # Job 4: Security Scan
+  # Builds the image and scans it with Trivy.
+  # Fails the build on HIGH or CRITICAL severity findings.
+  # -----------------------------------------------------------------
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Build the image locally so Trivy can scan it. Tagged with a
+      # CI-only name; not pushed anywhere.
+      - name: Build image for scanning
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: task-api:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Step A: Run Trivy with full output (informational — never fails the job).
+      # Shows everything in the CI log so we can see what's there.
+      - name: Trivy scan (all severities, informational)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: task-api:scan
+          format: table
+          severity: 'LOW,MEDIUM,HIGH,CRITICAL'
+          exit-code: '0'      # never fail on this step
+          ignore-unfixed: false
+
+      # Step B: Re-scan, this time only HIGH/CRITICAL, fails the job if any found.
+      # This is what controls whether the security job is green or red.
+      - name: Trivy scan (HIGH/CRITICAL, fails build)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: task-api:scan
+          format: table
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'      # fail the job if any HIGH/CRITICAL found
+          ignore-unfixed: true  # don't fail on issues with no available fix
